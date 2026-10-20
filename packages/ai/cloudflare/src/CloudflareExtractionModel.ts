@@ -84,10 +84,9 @@ const codePointSpanToUtf16 = (
   if (start < 0 || end < start || end >= offsets.length) return undefined
   return [offsets[start], offsets[end]]
 }
-const normalizeNumber = (raw: unknown): ExtractionModel.ProviderAnswer => {
-  const decoded = decodeNumberAnswer(raw)
-  if (Result.isFailure(decoded)) return invalid("Invalid extraction answer")
-  const answer = decoded.success
+const normalizeNumber = (
+  answer: typeof CloudflareSchema.ExtractionNumberAnswer.Type
+): ExtractionModel.ProviderAnswer => {
   return {
     _tag: "Number",
     value: answer.value,
@@ -101,13 +100,10 @@ const normalizeNumber = (raw: unknown): ExtractionModel.ProviderAnswer => {
   }
 }
 const normalizeSpan = (
-  raw: unknown,
+  answer: typeof CloudflareSchema.ExtractionTextAnswer.Type,
   state: string,
   offsets: ReadonlyArray<number>
 ): ExtractionModel.ProviderAnswer => {
-  const decoded = decodeTextAnswer(raw)
-  if (Result.isFailure(decoded)) return invalid("Invalid extraction answer")
-  const answer = decoded.success
   const evidence = answer.p_null === undefined ? {} : { nullProbability: answer.p_null }
   if (answer.span === undefined) {
     return {
@@ -141,10 +137,18 @@ const normalize = (
   offsets: ReadonlyArray<number>
 ): ExtractionModel.ProviderAnswer => {
   switch (field._tag) {
-    case "Number":
-      return normalizeNumber(raw)
-    case "Span":
-      return normalizeSpan(raw, state, offsets)
+    case "Number": {
+      const decoded = decodeNumberAnswer(raw)
+      return Result.isFailure(decoded)
+        ? invalid("Invalid extraction answer")
+        : normalizeNumber(decoded.success)
+    }
+    case "Span": {
+      const decoded = decodeTextAnswer(raw)
+      return Result.isFailure(decoded)
+        ? invalid("Invalid extraction answer")
+        : normalizeSpan(decoded.success, state, offsets)
+    }
     default:
       return absurd(field)
   }
