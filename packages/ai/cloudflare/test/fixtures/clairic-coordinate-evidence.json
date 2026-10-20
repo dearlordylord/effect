@@ -1,0 +1,45 @@
+{
+  "kind": "bounded-live-coordinate-probe",
+  "model": "clairic",
+  "requestCount": 3,
+  "automaticRetries": 0,
+  "sourceClass": "RUN",
+  "verificationState": "RUNTIME-TESTED",
+  "cases": [
+    {
+      "name": "ascii",
+      "providerSpan": [
+        12,
+        17
+      ],
+      "expectedUtf16Span": [
+        12,
+        17
+      ]
+    },
+    {
+      "name": "supplementary-unicode-before-target",
+      "providerSpan": [
+        8,
+        13
+      ],
+      "expectedUtf16Span": [
+        9,
+        14
+      ]
+    },
+    {
+      "name": "second-occurrence-after-supplementary-unicode",
+      "providerSpan": [
+        34,
+        39
+      ],
+      "expectedUtf16Span": [
+        35,
+        40
+      ]
+    }
+  ],
+  "observedConvention": "Unicode code points, inclusive start, exclusive end",
+  "scope": "Three synthetic text inputs only; exact input examples are in the matching offline model tests. Not a provider availability or permanent model guarantee."
+}

@@ -158,3 +158,56 @@ export const DecisionsResponse = Schema.Struct({
     output_tokens: Schema.Int
   })
 })
+
+/**
+ * Minimal Clairic extraction fields. Other field kinds are not yet supported.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionField = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("text"), instructions: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("number"),
+    instructions: Schema.String,
+    integer: Schema.optional(Schema.Boolean),
+    decimals: Schema.optional(Schema.Int),
+    unit: Schema.optional(Schema.String)
+  })
+])
+
+/**
+ * A text-only Clairic extraction request.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionsRequest = Schema.Struct({
+  model: Schema.Literal("clairic"),
+  state: Schema.String,
+  fields: Schema.Record(Schema.String, ExtractionField)
+})
+
+/**
+ * Clairic envelope. Field payloads remain unknown until per-field validation,
+ * so a malformed answer does not discard valid settled answers.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionsResponse = Schema.Struct({
+  model: Schema.String,
+  answers: Schema.Record(Schema.String, Schema.Unknown),
+  truncated: Schema.Boolean,
+  usage: Schema.Struct({
+    input_tokens: Schema.Int,
+    output_tokens: Schema.Int,
+    state_tokens: Schema.optional(Schema.Int),
+    image_tokens: Schema.optional(Schema.Int),
+    schema_tokens: Schema.optional(Schema.Int),
+    passes: Schema.optional(Schema.Int)
+  })
+})
