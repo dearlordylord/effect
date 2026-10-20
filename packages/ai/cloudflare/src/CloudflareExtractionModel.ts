@@ -10,7 +10,8 @@ import * as ExtractionModel from "effect/ai/ExtractionModel"
 import * as AiModel from "effect/ai/Model"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import { CloudflareClient } from "./CloudflareClient.ts"
 import type * as CloudflareSchema from "./CloudflareSchema.ts"
 
@@ -65,8 +66,33 @@ export const model = (
   AiModel.make("cloudflare", model, layer({ model }))
 
 const invalid = (description: string): ExtractionModel.ProviderAnswer => ({ _tag: "Invalid", description })
-const isFiniteNumber = (value: unknown): value is number => Predicate.isNumber(value) && Number.isFinite(value)
-const isUnitInterval = (value: unknown): value is number => isFiniteNumber(value) && value >= 0 && value <= 1
+const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+const evidence = {
+  confidence: Schema.optional(Probability),
+  p_null: Schema.optional(Probability)
+}
+const decodeNumberAnswer = Schema.decodeUnknownResult(Schema.Struct({
+  type: Schema.Literal("number"),
+  value: Schema.NullOr(Schema.Finite),
+  guess: Schema.optional(Schema.NullOr(Schema.Finite)),
+  ...evidence
+}))
+const decodeTextAnswer = Schema.decodeUnknownResult(Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    value: Schema.Null,
+    guess: Schema.optional(Schema.NullOr(Schema.String)),
+    span: Schema.optional(Schema.Never),
+    ...evidence
+  }),
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    value: Schema.NullOr(Schema.String),
+    guess: Schema.String,
+    span: Schema.Tuple([Schema.Int, Schema.Int]),
+    ...evidence
+  })
+]))
 
 // Convert Clairic code-point offsets to UTF-16; verified by live probes.
 const offsetMap = (state: string): ReadonlyArray<number> => {
@@ -74,12 +100,11 @@ const offsetMap = (state: string): ReadonlyArray<number> => {
   for (const character of state) offsets.push(offsets[offsets.length - 1] + character.length)
   return offsets
 }
-const spanOffsets = (raw: unknown, offsets: ReadonlyArray<number>): readonly [number, number] | undefined => {
-  if (!Array.isArray(raw) || raw.length !== 2) return undefined
-  const [start, end] = raw
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end >= offsets.length) {
-    return undefined
-  }
+const spanOffsets = (
+  [start, end]: readonly [number, number],
+  offsets: ReadonlyArray<number>
+): readonly [number, number] | undefined => {
+  if (start < 0 || end < start || end >= offsets.length) return undefined
   return [offsets[start], offsets[end]]
 }
 const normalize = (
@@ -88,53 +113,48 @@ const normalize = (
   state: string,
   offsets: ReadonlyArray<number>
 ): ExtractionModel.ProviderAnswer => {
-  if (
-    !Predicate.isObject(raw) || !Object.hasOwn(raw, "value") || raw.type !== (field._tag === "Span" ? "text" : "number")
-  ) return invalid("Invalid extraction answer kind or missing value")
-  if (raw.confidence !== undefined && !isUnitInterval(raw.confidence)) return invalid("Invalid confidence")
-  if (raw.p_null !== undefined && !isUnitInterval(raw.p_null)) return invalid("Invalid null probability")
-  const confidence = raw.confidence as number | undefined
   if (field._tag === "Number") {
-    if (raw.value !== null && !isFiniteNumber(raw.value)) return invalid("Invalid numeric value")
-    if (raw.guess !== undefined && raw.guess !== null && !isFiniteNumber(raw.guess)) {
-      return invalid("Invalid numeric guess")
-    }
+    const decoded = decodeNumberAnswer(raw)
+    if (Result.isFailure(decoded)) return invalid("Invalid extraction answer")
+    const answer = decoded.success
     return {
       _tag: "Number",
-      value: raw.value,
-      confidence,
+      value: answer.value,
+      confidence: answer.confidence,
       metadata: {
         cloudflare: {
-          ...(raw.guess === undefined ? {} : { guess: raw.guess as number | null }),
-          ...(raw.p_null === undefined ? {} : { nullProbability: raw.p_null as number })
+          ...(answer.guess === undefined ? {} : { guess: answer.guess }),
+          ...(answer.p_null === undefined ? {} : { nullProbability: answer.p_null })
         }
       }
     }
   }
-  if (raw.value !== null && typeof raw.value !== "string") return invalid("Invalid text value")
-  if (raw.guess !== undefined && raw.guess !== null && typeof raw.guess !== "string") {
-    return invalid("Invalid text guess")
+  const decoded = decodeTextAnswer(raw)
+  if (Result.isFailure(decoded)) return invalid("Invalid extraction answer")
+  const answer = decoded.success
+  const evidence = answer.p_null === undefined ? {} : { nullProbability: answer.p_null }
+  if (answer.span === undefined) {
+    return {
+      _tag: "Span",
+      value: null,
+      confidence: answer.confidence,
+      metadata: {
+        cloudflare: { ...evidence, ...(answer.guess === undefined ? {} : { guess: answer.guess }) }
+      }
+    }
   }
-  const span = raw.span === undefined ? undefined : spanOffsets(raw.span, offsets)
-  if (
-    raw.span !== undefined &&
-    (span === undefined || typeof raw.guess !== "string" || state.slice(span[0], span[1]) !== raw.guess)
-  ) return invalid("Invalid candidate source span")
-  if (raw.value !== null && (span === undefined || state.slice(span[0], span[1]) !== raw.value)) {
+  const span = spanOffsets(answer.span, offsets)
+  if (span === undefined || state.slice(span[0], span[1]) !== answer.guess) {
+    return invalid("Invalid candidate source span")
+  }
+  if (answer.value !== null && state.slice(span[0], span[1]) !== answer.value) {
     return invalid("Text value does not match its source span")
   }
   return {
     _tag: "Span",
-    value: raw.value === null ? null : { text: raw.value, start: span![0], end: span![1] },
-    confidence,
-    metadata: {
-      cloudflare: {
-        ...(span === undefined
-          ? (raw.guess === undefined ? {} : { guess: raw.guess as string | null })
-          : { guess: raw.guess as string, span }),
-        ...(raw.p_null === undefined ? {} : { nullProbability: raw.p_null as number })
-      }
-    }
+    value: answer.value === null ? null : { text: answer.value, start: span[0], end: span[1] },
+    confidence: answer.confidence,
+    metadata: { cloudflare: { ...evidence, guess: answer.guess, span } }
   }
 }
 

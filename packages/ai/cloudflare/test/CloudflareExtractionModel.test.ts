@@ -175,6 +175,32 @@ describe("CloudflareExtractionModel", () => {
       }).pipe(Effect.provide(provide({ ...answers, face: invalid }))))
   }
 
+  for (
+    const malformed of [
+      { type: "text", guess: "ALPHA" },
+      { type: "text", value: "ALPHA", guess: "ALPHA" },
+      { type: "text", value: null, span: null },
+      { type: "text", value: null, guess: "ALPHA", span: [34, 39, 40] },
+      { ...answers.code, confidence: NaN },
+      { ...answers.code, p_null: Infinity }
+    ]
+  ) {
+    it.effect(`decodes malformed text fields independently: ${JSON.stringify(malformed)}`, () =>
+      Effect.gen(function*() {
+        const { outcomes } = yield* ExtractionModel.extractSettled(definition, { input: state })
+        assert.isTrue(Result.isFailure(outcomes.code))
+        assert.isTrue(Result.isSuccess(outcomes.face))
+      }).pipe(Effect.provide(provide({ ...answers, code: malformed }))))
+  }
+
+  it.effect("does not include wire values in schema failure descriptions", () =>
+    Effect.gen(function*() {
+      const { outcomes } = yield* ExtractionModel.extractSettled(definition, { input: state })
+      if (Result.isFailure(outcomes.face)) {
+        assert.strictEqual(outcomes.face.failure.description.includes("private-wire-value"), false)
+      } else assert.fail("Expected invalid field")
+    }).pipe(Effect.provide(provide({ ...answers, face: { ...answers.face, guess: "private-wire-value" } }))))
+
   it.effect("reports absent fields as Missing without discarding good answers", () =>
     Effect.gen(function*() {
       const { outcomes } = yield* ExtractionModel.extractSettled(definition, { input: state })

@@ -41,5 +41,57 @@
     }
   ],
   "observedConvention": "Unicode code points, inclusive start, exclusive end",
-  "scope": "Three synthetic text inputs only; exact input examples are in the matching offline model tests. Not a provider availability or permanent model guarantee."
+  "scope": "Three synthetic text inputs only; exact input examples are in the matching offline model tests. Not a provider availability or permanent model guarantee.",
+  "reviewVerification": {
+    "date": "2026-10-20",
+    "client": "Rebuilt fork public packages consumed from multiverse-lab",
+    "requestCount": 4,
+    "automaticRetries": 0,
+    "timeoutSeconds": 30,
+    "cases": [
+      {
+        "name": "ascii",
+        "normalizedSpan": [
+          7,
+          12
+        ],
+        "expectedSpan": [
+          7,
+          12
+        ],
+        "passed": true
+      },
+      {
+        "name": "supplementary-unicode",
+        "normalizedSpan": [
+          10,
+          15
+        ],
+        "expectedSpan": [
+          10,
+          15
+        ],
+        "passed": true
+      },
+      {
+        "name": "repeated-supplementary",
+        "exactTargetPassed": false,
+        "details": "Initial exact-target assertion failed; one additional diagnostic request was made."
+      },
+      {
+        "name": "repeated-supplementary-diagnostic",
+        "normalizedSpan": [
+          21,
+          33
+        ],
+        "expectedSpan": [
+          21,
+          26
+        ],
+        "sourceSliceValidationPassed": true,
+        "exactTargetPassed": false
+      }
+    ],
+    "scope": "The repeated-text model answer included a longer fragment than requested. Public normalization validated its source slice; exact-target extraction acceptance failed. No general model-accuracy claim."
+  }
 }

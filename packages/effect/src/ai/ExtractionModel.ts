@@ -7,7 +7,6 @@
 import * as Context from "../Context.ts"
 import * as Effect from "../Effect.ts"
 import * as Option from "../Option.ts"
-import * as Predicate from "../Predicate.ts"
 import * as Result from "../Result.ts"
 import * as Schema from "../Schema.ts"
 import * as AiError from "./AiError.ts"
@@ -172,32 +171,39 @@ export interface ExtractionModel {
 
 const failure = (reason: Extraction.Unanswered["reason"], description: string): Extraction.Outcome<Extraction.Any> =>
   Result.fail({ _tag: "Unanswered", reason, description })
-const isFiniteNumber = (value: unknown): value is number => Predicate.isNumber(value) && Number.isFinite(value)
-const isUnitInterval = (value: unknown): value is number => isFiniteNumber(value) && value >= 0 && value <= 1
+const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+const answerEvidence = {
+  confidence: Schema.optional(Probability),
+  metadata: Schema.optional(Response.ProviderMetadata)
+}
+const decodeProviderAnswer = Schema.decodeUnknownResult(Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal("Refusal") }),
+  Schema.Struct({ _tag: Schema.Literal("Invalid"), description: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("Number"), value: Schema.NullOr(Schema.Finite), ...answerEvidence }),
+  Schema.Struct({
+    _tag: Schema.Literal("Span"),
+    value: Schema.NullOr(Schema.Struct({ text: Schema.String, start: Schema.Int, end: Schema.Int })),
+    ...answerEvidence
+  })
+]))
 type Method = "extract" | "extractSettled"
 
 const error = (method: Method, reason: AiError.AiErrorReason) =>
   AiError.make({ module: "ExtractionModel", method, reason })
 
-const validate = (state: string, field: Extraction.Any, answer: unknown): Extraction.Outcome<Extraction.Any> => {
-  if (!Predicate.isObject(answer)) return failure("Invalid", "Provider returned a malformed answer")
+const validate = (state: string, field: Extraction.Any, raw: unknown): Extraction.Outcome<Extraction.Any> => {
+  const decoded = decodeProviderAnswer(raw)
+  if (Result.isFailure(decoded)) return failure("Invalid", "Provider returned a malformed answer")
+  const answer = decoded.success
   if (answer._tag === "Refusal") return failure("Refused", "Provider refused to answer")
-  if (answer._tag === "Invalid") return failure("Invalid", String(answer.description))
-  if (answer._tag !== field._tag || !("value" in answer)) {
-    return failure("Invalid", "Provider returned an invalid answer kind or no value")
-  }
-  if (answer.confidence !== undefined && !isUnitInterval(answer.confidence)) {
-    return failure("Invalid", "Confidence must be in [0, 1]")
-  }
-  if (answer.metadata !== undefined && !Schema.is(Response.ProviderMetadata)(answer.metadata)) {
-    return failure("Invalid", "Invalid provider metadata")
-  }
-  const value = answer.value
-  switch (field._tag) {
-    case "Number":
+  if (answer._tag === "Invalid") return failure("Invalid", answer.description)
+  switch (answer._tag) {
+    case "Number": {
+      if (field._tag !== "Number") return failure("Invalid", "Provider returned an invalid answer kind")
+      const value = answer.value
       if (value !== null) {
-        if (!isFiniteNumber(value) || (field.integer === true && !Number.isInteger(value))) {
-          return failure("Invalid", "Expected a finite number satisfying integer constraints")
+        if (field.integer === true && !Number.isInteger(value)) {
+          return failure("Invalid", "Expected a number satisfying integer constraints")
         }
         // All finite numbers have shortest-decimal representations within 324 places; use Effect's decimal-aware check below that.
         if (
@@ -208,27 +214,27 @@ const validate = (state: string, field: Extraction.Any, answer: unknown): Extrac
         }
       }
       return Result.succeed({
-        value: value === null ? Option.none<number>() : Option.some(value as number),
-        ...(answer.confidence === undefined ? {} : { confidence: answer.confidence as number }),
+        value: value === null ? Option.none<number>() : Option.some(value),
+        ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
         metadata: answer.metadata ?? {}
       })
-    case "Span":
+    }
+    case "Span": {
+      if (field._tag !== "Span") return failure("Invalid", "Provider returned an invalid answer kind")
+      const value = answer.value
       if (
         value !== null &&
-        (!Predicate.isObject(value) || typeof value.text !== "string" || !Number.isInteger(value.start) ||
-          !Number.isInteger(value.end) || (value.start as number) < 0 ||
-          (value.end as number) < (value.start as number) || (value.end as number) > state.length ||
-          state.slice(value.start as number, value.end as number) !== value.text)
+        (value.start < 0 || value.end < value.start || value.end > state.length ||
+          state.slice(value.start, value.end) !== value.text)
       ) {
         return failure("Invalid", "Span must match the submitted source in UTF-16 coordinates")
       }
       return Result.succeed({
-        value: value === null
-          ? Option.none<Extraction.TextSpan>()
-          : Option.some(value as unknown as Extraction.TextSpan),
-        ...(answer.confidence === undefined ? {} : { confidence: answer.confidence as number }),
+        value: value === null ? Option.none<Extraction.TextSpan>() : Option.some(value),
+        ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
         metadata: answer.metadata ?? {}
       })
+    }
   }
 }
 
