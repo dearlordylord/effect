@@ -19,11 +19,12 @@ declare module "effect/ai/Extraction" {
     readonly cloudflare?: { readonly unit?: string } | null
   }
   interface SpanAnswerMetadata {
-    readonly cloudflare?: {
-      readonly guess?: string | null
-      readonly nullProbability?: number
-      readonly span?: readonly [number, number]
-    }
+    readonly cloudflare?:
+      & { readonly nullProbability?: number }
+      & (
+        | { readonly guess?: string | null; readonly span?: never }
+        | { readonly guess: string; readonly span: readonly [number, number] }
+      )
   }
   interface NumberAnswerMetadata {
     readonly cloudflare?: { readonly guess?: number | null; readonly nullProbability?: number }
@@ -64,8 +65,8 @@ export const model = (
   AiModel.make("cloudflare", model, layer({ model }))
 
 const invalid = (description: string): ExtractionModel.ProviderAnswer => ({ _tag: "Invalid", description })
-const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value)
-const probability = (value: unknown): value is number => finite(value) && value >= 0 && value <= 1
+const isFiniteNumber = (value: unknown): value is number => Predicate.isNumber(value) && Number.isFinite(value)
+const isUnitInterval = (value: unknown): value is number => isFiniteNumber(value) && value >= 0 && value <= 1
 
 // Clairic's live ASCII/Unicode/repeated-text probes report code-point offsets, end exclusive.
 // Keep the index map tied to this exact submitted source; never relocate a repeated match by searching.
@@ -91,12 +92,14 @@ const normalize = (
   if (
     !Predicate.isObject(raw) || !Object.hasOwn(raw, "value") || raw.type !== (field._tag === "Span" ? "text" : "number")
   ) return invalid("Invalid extraction answer kind or missing value")
-  if (raw.confidence !== undefined && !probability(raw.confidence)) return invalid("Invalid confidence")
-  if (raw.p_null !== undefined && !probability(raw.p_null)) return invalid("Invalid null probability")
+  if (raw.confidence !== undefined && !isUnitInterval(raw.confidence)) return invalid("Invalid confidence")
+  if (raw.p_null !== undefined && !isUnitInterval(raw.p_null)) return invalid("Invalid null probability")
   const confidence = raw.confidence as number | undefined
   if (field._tag === "Number") {
-    if (raw.value !== null && !finite(raw.value)) return invalid("Invalid numeric value")
-    if (raw.guess !== undefined && raw.guess !== null && !finite(raw.guess)) return invalid("Invalid numeric guess")
+    if (raw.value !== null && !isFiniteNumber(raw.value)) return invalid("Invalid numeric value")
+    if (raw.guess !== undefined && raw.guess !== null && !isFiniteNumber(raw.guess)) {
+      return invalid("Invalid numeric guess")
+    }
     return {
       _tag: "Number",
       value: raw.value,
@@ -127,9 +130,10 @@ const normalize = (
     confidence,
     metadata: {
       cloudflare: {
-        ...(raw.guess === undefined ? {} : { guess: raw.guess as string | null }),
-        ...(raw.p_null === undefined ? {} : { nullProbability: raw.p_null as number }),
-        ...(span === undefined ? {} : { span })
+        ...(span === undefined
+          ? (raw.guess === undefined ? {} : { guess: raw.guess as string | null })
+          : { guess: raw.guess as string, span }),
+        ...(raw.p_null === undefined ? {} : { nullProbability: raw.p_null as number })
       }
     }
   }

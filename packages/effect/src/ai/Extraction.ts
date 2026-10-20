@@ -90,6 +90,10 @@ export interface Span {
   readonly options: SpanOptions
 }
 
+type NumericConstraints =
+  | { readonly integer: true; readonly decimals?: never }
+  | { readonly integer?: false | undefined; readonly decimals?: number | undefined }
+
 /**
  * A numeric extraction or computation operation.
  *
@@ -97,13 +101,11 @@ export interface Span {
  * @category models
  * @since 4.0.6
  */
-export interface Number {
+export type Number = {
   readonly _tag: "Number"
   readonly instructions: Description
-  readonly integer?: boolean | undefined
-  readonly decimals?: number | undefined
   readonly options: NumberOptions
-}
+} & NumericConstraints
 
 /**
  * Supported extraction operations.
@@ -235,12 +237,12 @@ export const span = (options: {
  * @category constructors
  * @since 4.0.6
  */
-export const number = (options: {
-  readonly instructions: Description
-  readonly integer?: boolean | undefined
-  readonly decimals?: number | undefined
-  readonly options?: NumberOptions | undefined
-}): Number => {
+export const number = (
+  options: {
+    readonly instructions: Description
+    readonly options?: NumberOptions | undefined
+  } & NumericConstraints
+): Number => {
   if (options.integer !== undefined && typeof options.integer !== "boolean") {
     throw new Error("Extraction.number: integer must be a boolean")
   }

@@ -172,9 +172,11 @@ export interface ExtractionModel {
 
 const failure = (reason: Extraction.Unanswered["reason"], description: string): Extraction.Outcome<Extraction.Any> =>
   Result.fail({ _tag: "Unanswered", reason, description })
-const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value)
-const probability = (value: unknown): value is number => finite(value) && value >= 0 && value <= 1
-const error = (method: string, reason: AiError.AiErrorReason) =>
+const isFiniteNumber = (value: unknown): value is number => Predicate.isNumber(value) && Number.isFinite(value)
+const isUnitInterval = (value: unknown): value is number => isFiniteNumber(value) && value >= 0 && value <= 1
+type Method = "extract" | "extractSettled"
+
+const error = (method: Method, reason: AiError.AiErrorReason) =>
   AiError.make({ module: "ExtractionModel", method, reason })
 
 const validate = (state: string, field: Extraction.Any, answer: unknown): Extraction.Outcome<Extraction.Any> => {
@@ -184,7 +186,7 @@ const validate = (state: string, field: Extraction.Any, answer: unknown): Extrac
   if (answer._tag !== field._tag || !("value" in answer)) {
     return failure("Invalid", "Provider returned an invalid answer kind or no value")
   }
-  if (answer.confidence !== undefined && !probability(answer.confidence)) {
+  if (answer.confidence !== undefined && !isUnitInterval(answer.confidence)) {
     return failure("Invalid", "Confidence must be in [0, 1]")
   }
   if (answer.metadata !== undefined && !Schema.is(Response.ProviderMetadata)(answer.metadata)) {
@@ -194,7 +196,7 @@ const validate = (state: string, field: Extraction.Any, answer: unknown): Extrac
   switch (field._tag) {
     case "Number":
       if (value !== null) {
-        if (!finite(value) || (field.integer === true && !Number.isInteger(value))) {
+        if (!isFiniteNumber(value) || (field.integer === true && !Number.isInteger(value))) {
           return failure("Invalid", "Expected a finite number satisfying integer constraints")
         }
         // All finite numbers have shortest-decimal representations within 324 places; use Effect's decimal-aware check below that.
@@ -265,7 +267,7 @@ export const make = (params: {
 }): Effect.Effect<ExtractionModel> =>
   Effect.sync(() => {
     const settle = <I extends Extraction.Input, Fields extends Record<string, Extraction.Any>>(
-      method: string,
+      method: Method,
       definition: Extraction.Definition<I, Fields>,
       options: ExtractOptions<I>
     ): Effect.Effect<ExtractSettledResponse<Fields>, AiError.AiError, I["EncodingServices"]> =>

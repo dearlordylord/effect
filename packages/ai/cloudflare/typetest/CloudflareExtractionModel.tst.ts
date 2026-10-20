@@ -21,10 +21,31 @@ describe("Cloudflare extraction augmentation", () => {
       { readonly guess?: number | null; readonly nullProbability?: number } | undefined
     >()
     expect<Response["answers"]["code"]["metadata"]["cloudflare"]>().type.toBe<
-      | { readonly guess?: string | null; readonly nullProbability?: number; readonly span?: readonly [number, number] }
+      | (
+        & { readonly nullProbability?: number }
+        & (
+          | { readonly guess?: string | null; readonly span?: never }
+          | { readonly guess: string; readonly span: readonly [number, number] }
+        )
+      )
       | undefined
     >()
     expect(Extraction.number).type.not.toBeCallableWith({ instructions: "Total", options: { cloudflare: { unit: 1 } } })
+  })
+  it("rejects candidate coordinates without candidate text", () => {
+    type Metadata = NonNullable<Extraction.SpanAnswerMetadata["cloudflare"]>
+    expect<{ span: readonly [number, number] }>().type.not.toBeAssignableTo<Metadata>()
+    expect<{ guess: null; span: readonly [number, number] }>().type.not.toBeAssignableTo<Metadata>()
+    expect<{ guess: string }>().type.toBeAssignableTo<Metadata>()
+    expect<{ guess: string; span: readonly [number, number] }>().type.toBeAssignableTo<Metadata>()
+    expect(Extraction.number).type.not.toBeCallableWith({
+      instructions: "Unit",
+      options: { cloudflare: { unit: null } }
+    })
+    expect(Extraction.number).type.not.toBeCallableWith({
+      instructions: "Unit",
+      options: { cloudflare: { unit: undefined } }
+    })
   })
   it("accepts supported aliases and rejects unsupported models", () => {
     expect(CloudflareExtractionModel.model).type.toBeCallableWith("clairic")

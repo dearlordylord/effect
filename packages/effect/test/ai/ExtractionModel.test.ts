@@ -29,6 +29,7 @@ describe("Extraction", () => {
     for (const decimals of [-1, 0.5, NaN, Infinity]) {
       assert.throws(() => Extraction.number({ instructions: "n", decimals }))
     }
+    // @ts-expect-error Also validate conflicting constraints from untyped callers.
     assert.throws(() => Extraction.number({ instructions: "n", integer: true, decimals: 0 }))
     assert.deepStrictEqual(Extraction.number({ instructions: "n", integer: false, decimals: 2 }).options, {})
   })

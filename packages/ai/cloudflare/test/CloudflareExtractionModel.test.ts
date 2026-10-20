@@ -130,6 +130,23 @@ describe("CloudflareExtractionModel", () => {
       Effect.provide(provide({ ...answers, code: { ...answers.code, value: null, confidence: 0.99, p_null: 1 } }))
     ))
 
+  for (const guess of [undefined, null]) {
+    it.effect(`rejects candidate coordinates without text: ${guess}`, () =>
+      Effect.gen(function*() {
+        const { outcomes } = yield* ExtractionModel.extractSettled(definition, { input: state })
+        assert.isTrue(Result.isFailure(outcomes.code))
+        assert.isTrue(Result.isSuccess(outcomes.face))
+      }).pipe(Effect.provide(provide({ ...answers, code: { ...answers.code, value: null, guess } }))))
+  }
+
+  it.effect("preserves candidate text without coordinates", () =>
+    Effect.gen(function*() {
+      const { answers } = yield* ExtractionModel.extract(definition, { input: state })
+      assert.deepStrictEqual(answers.code.value, Option.none())
+      assert.strictEqual(answers.code.metadata.cloudflare?.guess, "ALPHA")
+      assert.isUndefined(answers.code.metadata.cloudflare?.span)
+    }).pipe(Effect.provide(provide({ ...answers, code: { type: "text", value: null, guess: "ALPHA" } }))))
+
   it.effect("preserves truncation without changing strict success", () =>
     Effect.gen(function*() {
       const { metadata } = yield* ExtractionModel.extract(definition, { input: state })

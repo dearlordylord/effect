@@ -43,6 +43,13 @@ describe("Extraction inference", () => {
     expect(ExtractionModel.extract).type.not.toBeCallableWith(definition, { input: 20 })
     expect<Extraction.NumberAnswer>().type.not.toBeAssignableTo<Extraction.SpanAnswer>()
   })
+  it("rejects conflicting numeric constraints", () => {
+    expect(Extraction.number).type.not.toBeCallableWith({ instructions: "Face", integer: true, decimals: 2 })
+    expect<{ _tag: "Number"; instructions: string; options: {}; integer: true; decimals: 2 }>().type.not
+      .toBeAssignableTo<Extraction.Number>()
+    expect(Extraction.number).type.toBeCallableWith({ instructions: "Face", integer: true })
+    expect(Extraction.number).type.toBeCallableWith({ instructions: "Face", integer: false, decimals: 2 })
+  })
   it("retains encoding-service requirements", () => {
     expect(ExtractionModel.extract(encoded, { input: "Mira" })).type.toBe<
       Effect.Effect<
