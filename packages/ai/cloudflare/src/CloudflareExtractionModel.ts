@@ -100,7 +100,7 @@ const decodeTextAnswer = Schema.decodeUnknownResult(Schema.Union([
   })
 ]))
 
-// Convert Clairic code-point offsets to UTF-16; verified by live probes.
+// Converts code-point offsets to UTF-16: offsetMap("A😀B") → [0, 1, 3, 4].
 const offsetMap = (state: string): ReadonlyArray<number> => {
   const offsets = [0]
   for (const character of state) offsets.push(offsets[offsets.length - 1] + character.length)
