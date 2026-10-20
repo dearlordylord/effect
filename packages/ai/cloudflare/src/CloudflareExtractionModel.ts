@@ -16,7 +16,7 @@ import type * as CloudflareSchema from "./CloudflareSchema.ts"
 
 declare module "effect/ai/Extraction" {
   interface NumberOptions {
-    readonly cloudflare?: { readonly unit?: string | null } | null
+    readonly cloudflare?: { readonly unit?: string } | null
   }
   interface SpanAnswerMetadata {
     readonly cloudflare?: {
@@ -176,7 +176,7 @@ export const make = Effect.fnUntraced(
               return yield* failInput("Clairic supports at most six decimal places")
             }
             const unit = field.options.cloudflare?.unit
-            if (unit !== undefined && unit !== null && typeof unit !== "string") {
+            if (unit !== undefined && typeof unit !== "string") {
               return yield* failInput("Clairic unit must be a string")
             }
             requestFields[key] = {
@@ -184,7 +184,7 @@ export const make = Effect.fnUntraced(
               instructions,
               ...(field.integer === undefined ? {} : { integer: field.integer }),
               ...(field.decimals === undefined ? {} : { decimals: field.decimals }),
-              ...(unit == null ? {} : { unit })
+              ...(unit === undefined ? {} : { unit })
             }
           }
         }
