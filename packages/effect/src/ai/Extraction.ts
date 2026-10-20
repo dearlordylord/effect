@@ -117,7 +117,8 @@ export type Number = {
 export type Any = Span | Number
 
 /**
- * A scalar answer. None is a valid report of insufficient information.
+ * A scalar answer. `Option.none()` represents a reported absence of a value,
+ * rather than a missing or invalid answer.
  *
  * @stability unstable
  * @category models
@@ -269,6 +270,7 @@ export const make = <I extends Input, Fields extends Record<string, Any>>(option
   readonly input: I
   readonly fields: Fields
 }): Definition<I, Fields> => {
+  // Record<string, Any> also accepts {}; enforce nonempty definitions at runtime.
   if (Object.keys(options.fields).length === 0) throw new Error("Extraction.make: fields must not be empty")
   return { [TypeId]: TypeId, ...options }
 }

@@ -267,7 +267,7 @@ const requireAnswers = <Fields extends Record<string, Extraction.Any>>(
 }
 
 /**
- * Creates a service that encodes text and validates answers. None is successful in both modes.
+ * Creates a service that encodes text and validates provider answers.
  *
  * @stability unstable
  * @category constructors
