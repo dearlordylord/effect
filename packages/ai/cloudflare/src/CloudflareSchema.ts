@@ -1,5 +1,5 @@
 /**
- * Codecs for text and JSON decisions from Cloudflare Clef models.
+ * Codecs for Cloudflare decision and extraction requests and responses.
  *
  * @stability unstable
  * @since 4.0.0
@@ -190,9 +190,66 @@ export const ExtractionsRequest = Schema.Struct({
   fields: Schema.Record(Schema.String, ExtractionField)
 })
 
+const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+const evidence = {
+  confidence: Schema.optional(Probability),
+  p_null: Schema.optional(Probability)
+}
 /**
- * Clairic envelope. Field payloads remain unknown until per-field validation,
- * so a malformed answer does not discard valid settled answers.
+ * A supported numeric extraction answer from Cloudflare.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionNumberAnswer = Schema.Struct({
+  type: Schema.Literal("number"),
+  value: Schema.NullOr(Schema.Finite),
+  guess: Schema.optional(Schema.NullOr(Schema.Finite)),
+  ...evidence
+})
+const UnlocatedSpanCandidate = Schema.Struct({
+  guess: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  span: Schema.optionalKey(Schema.Never)
+})
+const LocatedSpanCandidate = Schema.Struct({
+  guess: Schema.String,
+  span: Schema.Tuple([Schema.Int, Schema.Int])
+})
+/**
+ * Candidate text with optional coordinates. Coordinates require a string guess.
+ * The enclosing contract defines the coordinate units.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionTextCandidate = Schema.Union([UnlocatedSpanCandidate, LocatedSpanCandidate])
+/**
+ * A supported text extraction answer with code-point coordinates into the source.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionTextAnswer = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    value: Schema.Null,
+    ...UnlocatedSpanCandidate.fields,
+    ...evidence
+  }),
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    value: Schema.NullOr(Schema.String),
+    ...LocatedSpanCandidate.fields,
+    ...evidence
+  })
+])
+
+/**
+ * An extraction response envelope. The extraction service decodes field answers
+ * independently using the supported scalar answer schemas.
  *
  * @see https://developers.cloudflare.com/ai/models/@cf/cloudflare/clairic/schema-output.json
  *

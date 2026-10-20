@@ -14,14 +14,15 @@ import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { CloudflareClient } from "./CloudflareClient.ts"
-import type * as CloudflareSchema from "./CloudflareSchema.ts"
+import * as CloudflareSchema from "./CloudflareSchema.ts"
 
 declare module "effect/ai/Extraction" {
   interface NumberOptions {
     readonly cloudflare?: { readonly unit?: string } | null
   }
   interface SpanAnswerMetadata {
-    readonly cloudflare?: typeof SpanCandidate.Type & { readonly nullProbability?: number }
+    /** Candidate span coordinates are UTF-16 offsets into the submitted source. */
+    readonly cloudflare?: typeof CloudflareSchema.ExtractionTextCandidate.Type & { readonly nullProbability?: number }
   }
   interface NumberAnswerMetadata {
     readonly cloudflare?: { readonly guess?: number | null; readonly nullProbability?: number }
@@ -67,41 +68,8 @@ export const model = (
   AiModel.make("cloudflare", model, layer({ model }))
 
 const invalid = (description: string): ExtractionModel.ProviderAnswer => ({ _tag: "Invalid", description })
-const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
-const evidence = {
-  confidence: Schema.optional(Probability),
-  p_null: Schema.optional(Probability)
-}
-const decodeNumberAnswer = Schema.decodeUnknownResult(Schema.Struct({
-  type: Schema.Literal("number"),
-  value: Schema.NullOr(Schema.Finite),
-  guess: Schema.optional(Schema.NullOr(Schema.Finite)),
-  ...evidence
-}))
-const UnlocatedSpanCandidate = Schema.Struct({
-  guess: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  span: Schema.optionalKey(Schema.Never)
-})
-const LocatedSpanCandidate = Schema.Struct({
-  guess: Schema.String,
-  span: Schema.Tuple([Schema.Int, Schema.Int])
-})
-// Shares structure only; normalizeSpan converts wire coordinates to UTF-16.
-const SpanCandidate = Schema.Union([UnlocatedSpanCandidate, LocatedSpanCandidate])
-const decodeTextAnswer = Schema.decodeUnknownResult(Schema.Union([
-  Schema.Struct({
-    type: Schema.Literal("text"),
-    value: Schema.Null,
-    ...UnlocatedSpanCandidate.fields,
-    ...evidence
-  }),
-  Schema.Struct({
-    type: Schema.Literal("text"),
-    value: Schema.NullOr(Schema.String),
-    ...LocatedSpanCandidate.fields,
-    ...evidence
-  })
-]))
+const decodeNumberAnswer = Schema.decodeUnknownResult(CloudflareSchema.ExtractionNumberAnswer)
+const decodeTextAnswer = Schema.decodeUnknownResult(CloudflareSchema.ExtractionTextAnswer)
 
 // Converts code-point offsets to UTF-16: offsetMap("A😀B") → [0, 1, 3, 4].
 const offsetMap = (state: string): ReadonlyArray<number> => {
