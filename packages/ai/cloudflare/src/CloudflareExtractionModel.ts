@@ -21,12 +21,7 @@ declare module "effect/ai/Extraction" {
     readonly cloudflare?: { readonly unit?: string } | null
   }
   interface SpanAnswerMetadata {
-    readonly cloudflare?:
-      & { readonly nullProbability?: number }
-      & (
-        | { readonly guess?: string | null; readonly span?: never }
-        | { readonly guess: string; readonly span: readonly [number, number] }
-      )
+    readonly cloudflare?: typeof SpanCandidate.Type & { readonly nullProbability?: number }
   }
   interface NumberAnswerMetadata {
     readonly cloudflare?: { readonly guess?: number | null; readonly nullProbability?: number }
@@ -83,19 +78,27 @@ const decodeNumberAnswer = Schema.decodeUnknownResult(Schema.Struct({
   guess: Schema.optional(Schema.NullOr(Schema.Finite)),
   ...evidence
 }))
+const UnlocatedSpanCandidate = Schema.Struct({
+  guess: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  span: Schema.optionalKey(Schema.Never)
+})
+const LocatedSpanCandidate = Schema.Struct({
+  guess: Schema.String,
+  span: Schema.Tuple([Schema.Int, Schema.Int])
+})
+// Shares structure only; normalizeSpan converts wire coordinates to UTF-16.
+const SpanCandidate = Schema.Union([UnlocatedSpanCandidate, LocatedSpanCandidate])
 const decodeTextAnswer = Schema.decodeUnknownResult(Schema.Union([
   Schema.Struct({
     type: Schema.Literal("text"),
     value: Schema.Null,
-    guess: Schema.optional(Schema.NullOr(Schema.String)),
-    span: Schema.optional(Schema.Never),
+    ...UnlocatedSpanCandidate.fields,
     ...evidence
   }),
   Schema.Struct({
     type: Schema.Literal("text"),
     value: Schema.NullOr(Schema.String),
-    guess: Schema.String,
-    span: Schema.Tuple([Schema.Int, Schema.Int]),
+    ...LocatedSpanCandidate.fields,
     ...evidence
   })
 ]))
@@ -106,7 +109,7 @@ const offsetMap = (state: string): ReadonlyArray<number> => {
   for (const character of state) offsets.push(offsets[offsets.length - 1] + character.length)
   return offsets
 }
-const spanOffsets = (
+const codePointSpanToUtf16 = (
   [start, end]: readonly [number, number],
   offsets: ReadonlyArray<number>
 ): readonly [number, number] | undefined => {
@@ -148,7 +151,7 @@ const normalizeSpan = (
       }
     }
   }
-  const span = spanOffsets(answer.span, offsets)
+  const span = codePointSpanToUtf16(answer.span, offsets)
   if (span === undefined || state.slice(span[0], span[1]) !== answer.guess) {
     return invalid("Invalid candidate source span")
   }
