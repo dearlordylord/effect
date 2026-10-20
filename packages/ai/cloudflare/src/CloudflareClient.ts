@@ -105,11 +105,11 @@ export const make = Effect.fnUntraced(
       method: Errors.ClientMethod
     ): Effect.Effect<A, AiError.AiError> =>
       HttpClientRequest.bodyJson(HttpClientRequest.post(path + payload.model), payload).pipe(
-        Effect.mapError((cause) =>
+        Effect.mapError(() =>
           AiError.make({
             module: "CloudflareClient",
             method,
-            reason: new AiError.InvalidRequestError({ description: String(cause) })
+            reason: new AiError.InvalidRequestError({ description: "Failed to encode request body as JSON" })
           })
         ),
         Effect.flatMap(client.execute),
