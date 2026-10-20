@@ -102,7 +102,7 @@ export const make = Effect.fnUntraced(
         { readonly success: true; readonly result: A } | { readonly success: false },
         HttpClientError.HttpClientError | Schema.SchemaError
       >,
-      method: "createDecisions" | "createExtractions"
+      method: Errors.ClientMethod
     ): Effect.Effect<A, AiError.AiError> =>
       HttpClientRequest.bodyJson(HttpClientRequest.post(path + payload.model), payload).pipe(
         Effect.mapError((cause) =>

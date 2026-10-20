@@ -31,13 +31,15 @@ const retryAfter = (raw: string | undefined): Duration.Duration | undefined => {
   return Number.isNaN(date) ? undefined : Duration.millis(Math.max(0, date - Date.now()))
 }
 
-const failWith = (reason: AiError.AiErrorReason, method: string) =>
+export type ClientMethod = "createDecisions" | "createExtractions"
+
+const failWith = (reason: AiError.AiErrorReason, method: ClientMethod) =>
   Effect.fail(AiError.make({ module: "CloudflareClient", method, reason }))
 
 export const mapResponseError = Effect.fnUntraced(
   function*(
     response: HttpClientResponse.HttpClientResponse,
-    method = "createDecisions"
+    method: ClientMethod = "createDecisions"
   ): Effect.fn.Return<never, AiError.AiError> {
     const fail = (reason: AiError.AiErrorReason) => failWith(reason, method)
     const { request, status } = response
@@ -80,7 +82,7 @@ export const mapResponseError = Effect.fnUntraced(
 export const mapHttpClientError = Effect.fnUntraced(
   function*(
     error: HttpClientError.HttpClientError,
-    method = "createDecisions"
+    method: ClientMethod = "createDecisions"
   ): Effect.fn.Return<never, AiError.AiError> {
     const fail = (reason: AiError.AiErrorReason) => failWith(reason, method)
     const source = error.reason
