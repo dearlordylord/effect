@@ -154,7 +154,10 @@ export type NumberAnswer = ScalarAnswer<number, NumberAnswerMetadata>
  * @category models
  * @since 4.0.6
  */
-export type Answer<F extends Any> = F extends Span ? SpanAnswer : F extends Number ? NumberAnswer : never
+export type Answer<F extends Any> = {
+  readonly Span: SpanAnswer
+  readonly Number: NumberAnswer
+}[F["_tag"]]
 
 /**
  * Answers keyed by field name.

@@ -6,6 +6,7 @@
  */
 import * as Context from "../Context.ts"
 import * as Effect from "../Effect.ts"
+import { absurd } from "../Function.ts"
 import * as Option from "../Option.ts"
 import * as Result from "../Result.ts"
 import * as Schema from "../Schema.ts"
@@ -169,6 +170,8 @@ export interface ExtractionModel {
   ) => Effect.Effect<ExtractSettledResponse<Fields>, AiError.AiError, I["EncodingServices"]>
 }
 
+const supportedKinds = { Span: true, Number: true } satisfies Record<Extraction.Any["_tag"], true>
+
 const failure = (reason: Extraction.Unanswered["reason"], description: string): Extraction.Outcome<Extraction.Any> =>
   Result.fail({ _tag: "Unanswered", reason, description })
 const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
@@ -197,9 +200,9 @@ const validate = (state: string, field: Extraction.Any, raw: unknown): Extractio
   const answer = decoded.success
   if (answer._tag === "Refusal") return failure("Refused", "Provider refused to answer")
   if (answer._tag === "Invalid") return failure("Invalid", answer.description)
-  switch (answer._tag) {
+  switch (field._tag) {
     case "Number": {
-      if (field._tag !== "Number") return failure("Invalid", "Provider returned an invalid answer kind")
+      if (answer._tag !== "Number") return failure("Invalid", "Provider returned an invalid answer kind")
       const value = answer.value
       if (value !== null) {
         if (field.integer === true && !Number.isInteger(value)) {
@@ -220,7 +223,7 @@ const validate = (state: string, field: Extraction.Any, raw: unknown): Extractio
       })
     }
     case "Span": {
-      if (field._tag !== "Span") return failure("Invalid", "Provider returned an invalid answer kind")
+      if (answer._tag !== "Span") return failure("Invalid", "Provider returned an invalid answer kind")
       const value = answer.value
       if (
         value !== null &&
@@ -235,6 +238,8 @@ const validate = (state: string, field: Extraction.Any, raw: unknown): Extractio
         metadata: answer.metadata ?? {}
       })
     }
+    default:
+      return absurd(field)
   }
 }
 
@@ -282,7 +287,7 @@ export const make = (params: {
         Effect.flatMap((state) => {
           if (
             typeof state !== "string" ||
-            Object.values(definition.fields).some((field) => field._tag !== "Span" && field._tag !== "Number")
+            Object.values(definition.fields).some((field) => !Object.hasOwn(supportedKinds, field._tag))
           ) {
             return Effect.fail(
               error(

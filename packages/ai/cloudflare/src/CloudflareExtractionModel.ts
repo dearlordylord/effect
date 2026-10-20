@@ -9,6 +9,7 @@ import type * as Extraction from "effect/ai/Extraction"
 import * as ExtractionModel from "effect/ai/ExtractionModel"
 import * as AiModel from "effect/ai/Model"
 import * as Effect from "effect/Effect"
+import { absurd } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -107,28 +108,27 @@ const spanOffsets = (
   if (start < 0 || end < start || end >= offsets.length) return undefined
   return [offsets[start], offsets[end]]
 }
-const normalize = (
-  field: Extraction.Any,
+const normalizeNumber = (raw: unknown): ExtractionModel.ProviderAnswer => {
+  const decoded = decodeNumberAnswer(raw)
+  if (Result.isFailure(decoded)) return invalid("Invalid extraction answer")
+  const answer = decoded.success
+  return {
+    _tag: "Number",
+    value: answer.value,
+    confidence: answer.confidence,
+    metadata: {
+      cloudflare: {
+        ...(answer.guess === undefined ? {} : { guess: answer.guess }),
+        ...(answer.p_null === undefined ? {} : { nullProbability: answer.p_null })
+      }
+    }
+  }
+}
+const normalizeSpan = (
   raw: unknown,
   state: string,
   offsets: ReadonlyArray<number>
 ): ExtractionModel.ProviderAnswer => {
-  if (field._tag === "Number") {
-    const decoded = decodeNumberAnswer(raw)
-    if (Result.isFailure(decoded)) return invalid("Invalid extraction answer")
-    const answer = decoded.success
-    return {
-      _tag: "Number",
-      value: answer.value,
-      confidence: answer.confidence,
-      metadata: {
-        cloudflare: {
-          ...(answer.guess === undefined ? {} : { guess: answer.guess }),
-          ...(answer.p_null === undefined ? {} : { nullProbability: answer.p_null })
-        }
-      }
-    }
-  }
   const decoded = decodeTextAnswer(raw)
   if (Result.isFailure(decoded)) return invalid("Invalid extraction answer")
   const answer = decoded.success
@@ -158,85 +158,120 @@ const normalize = (
   }
 }
 
+const normalize = (
+  field: Extraction.Any,
+  raw: unknown,
+  state: string,
+  offsets: ReadonlyArray<number>
+): ExtractionModel.ProviderAnswer => {
+  switch (field._tag) {
+    case "Number":
+      return normalizeNumber(raw)
+    case "Span":
+      return normalizeSpan(raw, state, offsets)
+    default:
+      return absurd(field)
+  }
+}
+
+const failInput = (description: string) =>
+  Effect.fail(AiError.make({
+    module: "CloudflareExtractionModel",
+    method: "extract",
+    reason: new AiError.InvalidUserInputError({ description })
+  }))
+
+const encodeField = Effect.fnUntraced(function*(
+  field: Extraction.Any,
+  instructions: string
+): Effect.fn.Return<typeof CloudflareSchema.ExtractionField.Encoded, AiError.AiError> {
+  switch (field._tag) {
+    case "Span":
+      return { type: "text", instructions }
+    case "Number": {
+      if (field.decimals !== undefined && field.decimals > 6) {
+        return yield* failInput("Clairic supports at most six decimal places")
+      }
+      const unit = field.options.cloudflare?.unit
+      if (unit !== undefined && typeof unit !== "string") return yield* failInput("Clairic unit must be a string")
+      return {
+        type: "number",
+        instructions,
+        ...(field.integer === undefined ? {} : { integer: field.integer }),
+        ...(field.decimals === undefined ? {} : { decimals: field.decimals }),
+        ...(unit === undefined ? {} : { unit })
+      }
+    }
+    default:
+      return absurd(field)
+  }
+})
+
+const encodeRequest = Effect.fnUntraced(function*(
+  model: Model,
+  { state, fields }: ExtractionModel.ProviderOptions
+): Effect.fn.Return<typeof CloudflareSchema.ExtractionsRequest.Encoded, AiError.AiError> {
+  if (state.length === 0) return yield* failInput("Clairic requires nonempty text")
+  if (model !== "clairic" && model !== "@cf/cloudflare/clairic") {
+    return yield* failInput("Unsupported extraction model")
+  }
+  const requestFields: Record<string, typeof CloudflareSchema.ExtractionField.Encoded> = Object.create(null)
+  for (const [key, field] of Object.entries(fields)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(key)) return yield* failInput("Invalid Clairic field name")
+    const instructions = typeof field.instructions === "string"
+      ? field.instructions
+      : JSON.stringify(field.instructions)
+    requestFields[key] = yield* encodeField(field, instructions)
+  }
+  return { model: "clairic", state, fields: requestFields }
+})
+
+const normalizeResponse = (
+  response: typeof CloudflareSchema.ExtractionsResponse.Type,
+  { state, fields }: ExtractionModel.ProviderOptions
+): ExtractionModel.ProviderResponse => {
+  const offsets = Object.values(fields).some((field) => field._tag === "Span") ? offsetMap(state) : []
+  const answers: Record<string, ExtractionModel.ProviderAnswer> = Object.create(null)
+  for (const [key, field] of Object.entries(fields)) {
+    if (Object.hasOwn(response.answers, key)) {
+      answers[key] = normalize(field, response.answers[key], state, offsets)
+    }
+  }
+  return {
+    answers,
+    modelId: response.model,
+    usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+    metadata: {
+      cloudflare: {
+        truncated: response.truncated,
+        ...(response.usage.state_tokens === undefined ? {} : { stateTokens: response.usage.state_tokens }),
+        ...(response.usage.image_tokens === undefined ? {} : { imageTokens: response.usage.image_tokens }),
+        ...(response.usage.schema_tokens === undefined ? {} : { schemaTokens: response.usage.schema_tokens }),
+        ...(response.usage.passes === undefined ? {} : { passes: response.usage.passes })
+      }
+    }
+  }
+}
+
 /**
- * Builds a text-only extraction service. Unsupported precision fails before HTTP.
- * Candidate and value spans are normalized from code points to UTF-16.
+ * Builds a Cloudflare extraction service for text input.
  *
  * @stability unstable
  * @category constructors
  * @since 4.0.6
  */
-export const make = Effect.fnUntraced(
-  function*(
-    options: { readonly model: Model }
-  ): Effect.fn.Return<ExtractionModel.ExtractionModel, never, CloudflareClient> {
-    const client = yield* CloudflareClient
-    return yield* ExtractionModel.make({
-      extract: Effect.fnUntraced(function*({ state, fields }) {
-        const failInput = (description: string) =>
-          Effect.fail(
-            AiError.make({
-              module: "CloudflareExtractionModel",
-              method: "extract",
-              reason: new AiError.InvalidUserInputError({ description })
-            })
-          )
-        if (state.length === 0) return yield* failInput("Clairic requires nonempty text")
-        if (options.model !== "clairic" && options.model !== "@cf/cloudflare/clairic") {
-          return yield* failInput("Unsupported extraction model")
-        }
-        const requestFields: Record<string, typeof CloudflareSchema.ExtractionField.Encoded> = Object.create(null)
-        for (const [key, field] of Object.entries(fields)) {
-          if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(key)) {
-            return yield* failInput("Invalid Clairic field name")
-          }
-          const instructions = typeof field.instructions === "string"
-            ? field.instructions
-            : JSON.stringify(field.instructions)
-          if (field._tag === "Span") requestFields[key] = { type: "text", instructions }
-          else {
-            if (field.decimals !== undefined && field.decimals > 6) {
-              return yield* failInput("Clairic supports at most six decimal places")
-            }
-            const unit = field.options.cloudflare?.unit
-            if (unit !== undefined && typeof unit !== "string") {
-              return yield* failInput("Clairic unit must be a string")
-            }
-            requestFields[key] = {
-              type: "number",
-              instructions,
-              ...(field.integer === undefined ? {} : { integer: field.integer }),
-              ...(field.decimals === undefined ? {} : { decimals: field.decimals }),
-              ...(unit === undefined ? {} : { unit })
-            }
-          }
-        }
-        const response = yield* client.createExtractions({ model: "clairic", state, fields: requestFields })
-        const offsets = Object.values(fields).some((field) => field._tag === "Span") ? offsetMap(state) : []
-        const answers: Record<string, ExtractionModel.ProviderAnswer> = Object.create(null)
-        for (const [key, field] of Object.entries(fields)) {
-          if (Object.hasOwn(response.answers, key)) {
-            answers[key] = normalize(field, response.answers[key], state, offsets)
-          }
-        }
-        return {
-          answers,
-          modelId: response.model,
-          usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
-          metadata: {
-            cloudflare: {
-              truncated: response.truncated,
-              ...(response.usage.state_tokens === undefined ? {} : { stateTokens: response.usage.state_tokens }),
-              ...(response.usage.image_tokens === undefined ? {} : { imageTokens: response.usage.image_tokens }),
-              ...(response.usage.schema_tokens === undefined ? {} : { schemaTokens: response.usage.schema_tokens }),
-              ...(response.usage.passes === undefined ? {} : { passes: response.usage.passes })
-            }
-          }
-        }
-      })
+export const make = Effect.fnUntraced(function*(
+  options: { readonly model: Model }
+): Effect.fn.Return<ExtractionModel.ExtractionModel, never, CloudflareClient> {
+  const client = yield* CloudflareClient
+  return yield* ExtractionModel.make({
+    extract: Effect.fnUntraced(function*(request) {
+      const payload = yield* encodeRequest(options.model, request)
+      const response = yield* client.createExtractions(payload)
+      return normalizeResponse(response, request)
     })
-  }
-)
+  })
+})
 
 /**
  * Provides Clairic extraction using an existing CloudflareClient.
