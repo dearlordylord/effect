@@ -241,6 +241,46 @@ describe("CloudflareExtractionModel", () => {
       ))
   }
 
+  for (const mode of ["strict", "settled"] as const) {
+    it.effect(`rejects cyclic instructions before HTTP in ${mode} mode`, () =>
+      Effect.gen(function*() {
+        const instructions: { [key: string]: Schema.Json } = {}
+        instructions.self = instructions
+        const d = Extraction.make({
+          input: Schema.String,
+          fields: { amount: Extraction.number({ instructions }) }
+        })
+        const result = yield* Effect.result(
+          mode === "strict"
+            ? ExtractionModel.extract(d, { input: "amount 20" }).pipe(Effect.asVoid)
+            : ExtractionModel.extractSettled(d, { input: "amount 20" }).pipe(Effect.asVoid)
+        )
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure.reason._tag, "InvalidUserInputError")
+        } else assert.fail("Expected invalid instructions")
+      }).pipe(
+        Effect.provide(CloudflareExtractionModel.layer()),
+        Effect.provide(client(envelope(), () => assert.fail("HTTP must not be called")))
+      ))
+  }
+
+  it.effect("serializes array instructions without modifying the source", () =>
+    Effect.gen(function*() {
+      const d = Extraction.make({
+        input: Schema.String,
+        fields: { face: Extraction.number({ instructions: ["Natural face", { exclude: "total" }] }) }
+      })
+      yield* ExtractionModel.extract(d, { input: state })
+    }).pipe(
+      Effect.provide(CloudflareExtractionModel.layer()),
+      Effect.provide(client(envelope(), (request) => {
+        if (request.body._tag !== "Uint8Array") return assert.fail("Expected JSON body")
+        const body = JSON.parse(new TextDecoder().decode(request.body.body))
+        assert.strictEqual(body.state, state)
+        assert.strictEqual(body.fields.face.instructions, "[\"Natural face\",{\"exclude\":\"total\"}]")
+      }))
+    ))
+
   it.effect("sends decimal precision in the field request", () =>
     Effect.gen(function*() {
       const d = Extraction.make({

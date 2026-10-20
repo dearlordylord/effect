@@ -207,6 +207,21 @@ const encodeField = Effect.fnUntraced(function*(
   }
 })
 
+const encodeInstructions = (instructions: Extraction.Description): Effect.Effect<string, AiError.AiError> =>
+  typeof instructions === "string" ? Effect.succeed(instructions) : Effect.try({
+    try: () => {
+      const encoded = JSON.stringify(instructions)
+      if (encoded === undefined) throw new Error("Instructions did not encode to JSON")
+      return encoded
+    },
+    catch: () =>
+      AiError.make({
+        module: "CloudflareExtractionModel",
+        method: "extract",
+        reason: new AiError.InvalidUserInputError({ description: "Instructions must be JSON-serializable" })
+      })
+  })
+
 const encodeRequest = Effect.fnUntraced(function*(
   model: Model,
   { state, fields }: ExtractionModel.ProviderOptions
@@ -218,9 +233,7 @@ const encodeRequest = Effect.fnUntraced(function*(
   const requestFields: Record<string, typeof CloudflareSchema.ExtractionField.Encoded> = Object.create(null)
   for (const [key, field] of Object.entries(fields)) {
     if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(key)) return yield* failInput("Invalid Clairic field name")
-    const instructions = typeof field.instructions === "string"
-      ? field.instructions
-      : JSON.stringify(field.instructions)
+    const instructions = yield* encodeInstructions(field.instructions)
     requestFields[key] = yield* encodeField(field, instructions)
   }
   return { model: "clairic", state, fields: requestFields }
