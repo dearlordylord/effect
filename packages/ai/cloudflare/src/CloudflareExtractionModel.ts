@@ -1,5 +1,5 @@
 /**
- * Cloudflare Clairic extraction over Workers AI REST.
+ * Cloudflare extraction over Workers AI REST.
  *
  * @stability unstable
  * @since 4.0.6
