@@ -1,5 +1,6 @@
 import * as CloudflareClient from "@effect/ai-cloudflare/CloudflareClient"
 import * as CloudflareExtractionModel from "@effect/ai-cloudflare/CloudflareExtractionModel"
+import * as CloudflareSchema from "@effect/ai-cloudflare/CloudflareSchema"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Option, Redacted, Result, Schema } from "effect"
 import { Extraction, ExtractionModel, Model } from "effect/ai"
@@ -280,6 +281,50 @@ describe("CloudflareExtractionModel", () => {
         assert.strictEqual(body.fields.face.instructions, "[\"Natural face\",{\"exclude\":\"total\"}]")
       }))
     ))
+
+  it("rejects invalid request property names rather than dropping them", () => {
+    const decoded = Schema.decodeUnknownResult(CloudflareSchema.ExtractionsRequest)({
+      model: "clairic",
+      state: "Face 20",
+      fields: { "bad key": { type: "number", instructions: "Face" } }
+    })
+    assert.isTrue(Result.isFailure(decoded))
+  })
+
+  for (const key of ["", "1face", "face space", "é", "a".repeat(65)]) {
+    it.effect(`rejects invalid field name before HTTP: ${JSON.stringify(key)}`, () =>
+      Effect.gen(function*() {
+        const d = Extraction.make({
+          input: Schema.String,
+          fields: { [key]: Extraction.number({ instructions: "Face" }) }
+        })
+        const result = yield* Effect.result(ExtractionModel.extract(d, { input: "Face 20" }))
+        if (Result.isFailure(result)) assert.strictEqual(result.failure.reason._tag, "InvalidUserInputError")
+        else assert.fail("Expected invalid field name")
+      }).pipe(
+        Effect.provide(CloudflareExtractionModel.layer()),
+        Effect.provide(client(envelope(), () => assert.fail("HTTP must not be called")))
+      ))
+  }
+
+  for (const key of ["a".repeat(64), "_face.1-", "__proto__"]) {
+    it.effect(`preserves valid field name: ${key}`, () =>
+      Effect.gen(function*() {
+        const d = Extraction.make({
+          input: Schema.String,
+          fields: { [key]: Extraction.number({ instructions: "Face" }) }
+        })
+        const { answers } = yield* ExtractionModel.extract(d, { input: "Face 20" })
+        assert.deepStrictEqual(answers[key].value, Option.some(20))
+      }).pipe(
+        Effect.provide(CloudflareExtractionModel.layer()),
+        Effect.provide(client(envelope({ [key]: answers.face }), (request) => {
+          if (request.body._tag !== "Uint8Array") return assert.fail("Expected JSON body")
+          const body = JSON.parse(new TextDecoder().decode(request.body.body))
+          assert.deepStrictEqual(Object.keys(body.fields), [key])
+        }))
+      ))
+  }
 
   it.effect("sends decimal precision in the field request", () =>
     Effect.gen(function*() {

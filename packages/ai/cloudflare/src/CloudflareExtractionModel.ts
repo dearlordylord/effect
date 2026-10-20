@@ -68,6 +68,7 @@ export const model = (
   AiModel.make("cloudflare", model, layer({ model }))
 
 const invalid = (description: string): ExtractionModel.ProviderAnswer => ({ _tag: "Invalid", description })
+const isFieldName = Schema.is(CloudflareSchema.ExtractionFieldName)
 const decodeNumberAnswer = Schema.decodeUnknownResult(CloudflareSchema.ExtractionNumberAnswer)
 const decodeTextAnswer = Schema.decodeUnknownResult(CloudflareSchema.ExtractionTextAnswer)
 
@@ -212,7 +213,7 @@ const encodeRequest = Effect.fnUntraced(function*(
   }
   const requestFields: Record<string, typeof CloudflareSchema.ExtractionField.Encoded> = Object.create(null)
   for (const [key, field] of Object.entries(fields)) {
-    if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(key)) return yield* failInput("Invalid Clairic field name")
+    if (!isFieldName(key)) return yield* failInput("Invalid Clairic field name")
     const instructions = yield* encodeInstructions(field.instructions)
     requestFields[key] = yield* encodeField(field, instructions)
   }
@@ -247,7 +248,10 @@ const normalizeResponse = (
 }
 
 /**
- * Builds a Cloudflare extraction service for text input.
+ * Builds a Cloudflare extraction service for text input. Input codecs encode
+ * to the submitted source string; image input is not supported.
+ *
+ * @see https://developers.cloudflare.com/workers-ai/models/clairic/
  *
  * @stability unstable
  * @category constructors

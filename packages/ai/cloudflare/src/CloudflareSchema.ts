@@ -178,7 +178,22 @@ export const ExtractionField = Schema.Union([
 ])
 
 /**
- * A text-only Clairic extraction request.
+ * A field name of 1–64 ASCII characters, beginning with a letter or underscore
+ * and containing only letters, digits, underscores, dots, or hyphens.
+ *
+ * @see https://developers.cloudflare.com/ai/models/@cf/cloudflare/clairic/schema-input.json
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionFieldName = Schema.String.check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/))
+
+/**
+ * An extraction request with text input and named fields. This integration
+ * supports text input only; Clairic also supports images, which are not exposed here.
+ *
+ * @see https://developers.cloudflare.com/workers-ai/models/clairic/
  *
  * @stability unstable
  * @category schemas
@@ -187,7 +202,7 @@ export const ExtractionField = Schema.Union([
 export const ExtractionsRequest = Schema.Struct({
   model: Schema.Literal("clairic"),
   state: Schema.String,
-  fields: Schema.Record(Schema.String, ExtractionField)
+  fields: Schema.Record(Schema.String, ExtractionField).check(Schema.isPropertyNames(ExtractionFieldName))
 })
 
 const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
