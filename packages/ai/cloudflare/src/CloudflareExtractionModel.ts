@@ -35,6 +35,11 @@ declare module "effect/ai/Extraction" {
 
 declare module "effect/ai/ExtractionModel" {
   interface ExtractResponseMetadata {
+    /**
+     * Provider-reported truncation and usage details.
+     *
+     * @see https://developers.cloudflare.com/ai/models/@cf/cloudflare/clairic/schema-output.json
+     */
     readonly cloudflare?: {
       readonly truncated: boolean
       readonly stateTokens?: number

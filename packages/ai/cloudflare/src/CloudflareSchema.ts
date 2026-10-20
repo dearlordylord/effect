@@ -194,6 +194,8 @@ export const ExtractionsRequest = Schema.Struct({
  * Clairic envelope. Field payloads remain unknown until per-field validation,
  * so a malformed answer does not discard valid settled answers.
  *
+ * @see https://developers.cloudflare.com/ai/models/@cf/cloudflare/clairic/schema-output.json
+ *
  * @stability unstable
  * @category schemas
  * @since 4.0.6
