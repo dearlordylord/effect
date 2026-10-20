@@ -68,8 +68,7 @@ const invalid = (description: string): ExtractionModel.ProviderAnswer => ({ _tag
 const isFiniteNumber = (value: unknown): value is number => Predicate.isNumber(value) && Number.isFinite(value)
 const isUnitInterval = (value: unknown): value is number => isFiniteNumber(value) && value >= 0 && value <= 1
 
-// Clairic's live ASCII/Unicode/repeated-text probes report code-point offsets, end exclusive.
-// Keep the index map tied to this exact submitted source; never relocate a repeated match by searching.
+// Convert Clairic code-point offsets to UTF-16; verified by live probes.
 const offsetMap = (state: string): ReadonlyArray<number> => {
   const offsets = [0]
   for (const character of state) offsets.push(offsets[offsets.length - 1] + character.length)
