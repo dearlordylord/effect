@@ -31,11 +31,17 @@ const retryAfter = (raw: string | undefined): Duration.Duration | undefined => {
   return Number.isNaN(date) ? undefined : Duration.millis(Math.max(0, date - Date.now()))
 }
 
-const fail = (reason: AiError.AiErrorReason) =>
-  Effect.fail(AiError.make({ module: "CloudflareClient", method: "createDecisions", reason }))
+export type ClientMethod = "createDecisions" | "createExtractions"
+
+const failWith = (reason: AiError.AiErrorReason, method: ClientMethod) =>
+  Effect.fail(AiError.make({ module: "CloudflareClient", method, reason }))
 
 export const mapResponseError = Effect.fnUntraced(
-  function*(response: HttpClientResponse.HttpClientResponse): Effect.fn.Return<never, AiError.AiError> {
+  function*(
+    response: HttpClientResponse.HttpClientResponse,
+    method: ClientMethod = "createDecisions"
+  ): Effect.fn.Return<never, AiError.AiError> {
+    const fail = (reason: AiError.AiErrorReason) => failWith(reason, method)
     const { request, status } = response
     const body = yield* response.text.pipe(Effect.orElseSucceed(() => undefined))
     const parsed = yield* Effect.try(() => JSON.parse(body ?? "")).pipe(Effect.orElseSucceed(() => undefined))
@@ -74,7 +80,11 @@ export const mapResponseError = Effect.fnUntraced(
 )
 
 export const mapHttpClientError = Effect.fnUntraced(
-  function*(error: HttpClientError.HttpClientError): Effect.fn.Return<never, AiError.AiError> {
+  function*(
+    error: HttpClientError.HttpClientError,
+    method: ClientMethod = "createDecisions"
+  ): Effect.fn.Return<never, AiError.AiError> {
+    const fail = (reason: AiError.AiErrorReason) => failWith(reason, method)
     const source = error.reason
     switch (source._tag) {
       case "TransportError":
@@ -95,7 +105,7 @@ export const mapHttpClientError = Effect.fnUntraced(
           })
         )
       case "StatusCodeError":
-        return yield* mapResponseError(source.response)
+        return yield* mapResponseError(source.response, method)
     }
   }
 )

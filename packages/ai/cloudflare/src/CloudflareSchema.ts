@@ -1,5 +1,5 @@
 /**
- * Codecs for text and JSON decisions from Cloudflare Clef models.
+ * Codecs for Cloudflare decision and extraction requests and responses.
  *
  * @stability unstable
  * @since 4.0.0
@@ -156,5 +156,132 @@ export const DecisionsResponse = Schema.Struct({
   usage: Schema.Struct({
     input_tokens: Schema.Int,
     output_tokens: Schema.Int
+  })
+})
+
+/**
+ * Minimal Clairic extraction fields. Other field kinds are not yet supported.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionField = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("text"), instructions: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("number"),
+    instructions: Schema.String,
+    integer: Schema.optional(Schema.Boolean),
+    decimals: Schema.optional(Schema.Int),
+    unit: Schema.optional(Schema.String)
+  })
+])
+
+/**
+ * A field name of 1–64 ASCII characters, beginning with a letter or underscore
+ * and containing only letters, digits, underscores, dots, or hyphens.
+ *
+ * @see https://developers.cloudflare.com/ai/models/@cf/cloudflare/clairic/schema-input.json
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionFieldName = Schema.String.check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/))
+
+/**
+ * An extraction request with text input and named fields. This integration
+ * supports text input only; Clairic also supports images, which are not exposed here.
+ *
+ * @see https://developers.cloudflare.com/workers-ai/models/clairic/
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionsRequest = Schema.Struct({
+  model: Schema.Literal("clairic"),
+  state: Schema.String,
+  fields: Schema.Record(Schema.String, ExtractionField).check(Schema.isPropertyNames(ExtractionFieldName))
+})
+
+const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+const evidence = {
+  confidence: Schema.optional(Probability),
+  p_null: Schema.optional(Probability)
+}
+/**
+ * A supported numeric extraction answer from Cloudflare.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionNumberAnswer = Schema.Struct({
+  type: Schema.Literal("number"),
+  value: Schema.NullOr(Schema.Finite),
+  guess: Schema.optional(Schema.NullOr(Schema.Finite)),
+  ...evidence
+})
+const UnlocatedSpanCandidate = Schema.Struct({
+  guess: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  span: Schema.optionalKey(Schema.Never)
+})
+const LocatedSpanCandidate = Schema.Struct({
+  guess: Schema.String,
+  span: Schema.Tuple([Schema.Int, Schema.Int])
+})
+/**
+ * Candidate text with optional coordinates. Coordinates require a string guess.
+ * The enclosing contract defines the coordinate units.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionTextCandidate = Schema.Union([UnlocatedSpanCandidate, LocatedSpanCandidate])
+/**
+ * A supported text extraction answer with code-point coordinates into the source.
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionTextAnswer = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    value: Schema.Null,
+    ...UnlocatedSpanCandidate.fields,
+    ...evidence
+  }),
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    value: Schema.NullOr(Schema.String),
+    ...LocatedSpanCandidate.fields,
+    ...evidence
+  })
+])
+
+/**
+ * An extraction response envelope. The extraction service decodes field answers
+ * independently using the supported scalar answer schemas.
+ *
+ * @see https://developers.cloudflare.com/ai/models/@cf/cloudflare/clairic/schema-output.json
+ *
+ * @stability unstable
+ * @category schemas
+ * @since 4.0.6
+ */
+export const ExtractionsResponse = Schema.Struct({
+  model: Schema.String,
+  answers: Schema.Record(Schema.String, Schema.Unknown),
+  truncated: Schema.Boolean,
+  usage: Schema.Struct({
+    input_tokens: Schema.Int,
+    output_tokens: Schema.Int,
+    state_tokens: Schema.optional(Schema.Int),
+    image_tokens: Schema.optional(Schema.Int),
+    schema_tokens: Schema.optional(Schema.Int),
+    passes: Schema.optional(Schema.Int)
   })
 })

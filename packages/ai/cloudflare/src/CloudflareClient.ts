@@ -1,5 +1,5 @@
 /**
- * HTTP client for Cloudflare Clef decisions through Workers AI REST.
+ * HTTP client for Cloudflare decisions and extractions through Workers AI REST.
  *
  * @stability unstable
  * @since 4.0.0
@@ -10,6 +10,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { flow, identity } from "effect/Function"
 import * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientError from "effect/http/HttpClientError"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
@@ -19,13 +20,16 @@ import * as CloudflareSchema from "./CloudflareSchema.ts"
 import * as Errors from "./internal/errors.ts"
 
 /**
- * Low-level Cloudflare decision operations.
+ * Low-level Cloudflare decision and extraction operations.
  *
  * @stability unstable
  * @category services
  * @since 4.0.0
  */
 export interface Service {
+  readonly createExtractions: (
+    request: typeof CloudflareSchema.ExtractionsRequest.Encoded
+  ) => Effect.Effect<typeof CloudflareSchema.ExtractionsResponse.Type, AiError.AiError>
   readonly client: HttpClient.HttpClient
   readonly createDecisions: (
     request: typeof CloudflareSchema.DecisionsRequest.Encoded
@@ -58,10 +62,14 @@ export interface Options {
   readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
 }
 
-const decodeResponse = HttpClientResponse.schemaBodyJson(Schema.Union([
-  Schema.Struct({ success: Schema.Literal(true), result: CloudflareSchema.DecisionsResponse }),
-  Schema.Struct({ success: Schema.Literal(false) })
-]))
+const decodeResponse = <A>(schema: Schema.ConstraintDecoder<A>) =>
+  HttpClientResponse.schemaBodyJson(Schema.Union([
+    Schema.Struct({ success: Schema.Literal(true), result: schema }),
+    Schema.Struct({ success: Schema.Literal(false) })
+  ]))
+
+const decodeDecisionsResponse = decodeResponse(CloudflareSchema.DecisionsResponse)
+const decodeExtractionsResponse = decodeResponse(CloudflareSchema.ExtractionsResponse)
 
 /**
  * Builds a Cloudflare client without automatic retries.
@@ -86,33 +94,46 @@ export const make = Effect.fnUntraced(
       options.transformClient ?? identity
     )
     const path = `/accounts/${encodeURIComponent(options.accountId)}/ai/run/@cf/cloudflare/`
+    const execute = <A>(
+      payload: { readonly model: string },
+      decode: (
+        response: HttpClientResponse.HttpClientResponse
+      ) => Effect.Effect<
+        { readonly success: true; readonly result: A } | { readonly success: false },
+        HttpClientError.HttpClientError | Schema.SchemaError
+      >,
+      method: Errors.ClientMethod
+    ): Effect.Effect<A, AiError.AiError> =>
+      HttpClientRequest.bodyJson(HttpClientRequest.post(path + payload.model), payload).pipe(
+        Effect.mapError(() =>
+          AiError.make({
+            module: "CloudflareClient",
+            method,
+            reason: new AiError.InvalidRequestError({ description: "Failed to encode request body as JSON" })
+          })
+        ),
+        Effect.flatMap(client.execute),
+        Effect.flatMap((response) =>
+          decode(response).pipe(
+            Effect.flatMap((body) =>
+              body.success ? Effect.succeed(body.result) : Errors.mapResponseError(response, method)
+            )
+          )
+        ),
+        Effect.catchTags({
+          HttpClientError: (cause) => Errors.mapHttpClientError(cause, method),
+          SchemaError: (cause) =>
+            Effect.fail(AiError.make({
+              module: "CloudflareClient",
+              method,
+              reason: AiError.InvalidResponseError.fromSchemaError(cause)
+            }))
+        })
+      )
     return CloudflareClient.of({
       client,
-      createDecisions: (payload) =>
-        HttpClientRequest.bodyJson(HttpClientRequest.post(path + payload.model), payload).pipe(
-          Effect.mapError((error) =>
-            AiError.make({
-              module: "CloudflareClient",
-              method: "createDecisions",
-              reason: new AiError.InvalidRequestError({ description: String(error) })
-            })
-          ),
-          Effect.flatMap(client.execute),
-          Effect.flatMap((response) =>
-            decodeResponse(response).pipe(
-              Effect.flatMap((body) => body.success ? Effect.succeed(body.result) : Errors.mapResponseError(response))
-            )
-          ),
-          Effect.catchTags({
-            HttpClientError: Errors.mapHttpClientError,
-            SchemaError: (error) =>
-              Effect.fail(AiError.make({
-                module: "CloudflareClient",
-                method: "createDecisions",
-                reason: AiError.InvalidResponseError.fromSchemaError(error)
-              }))
-          })
-        )
+      createDecisions: (payload) => execute(payload, decodeDecisionsResponse, "createDecisions"),
+      createExtractions: (payload) => execute(payload, decodeExtractionsResponse, "createExtractions")
     })
   }
 )
